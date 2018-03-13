@@ -104,7 +104,7 @@ function ContactSensorAccessorySonOff(log, config) {
 			
 			if (data.hasOwnProperty("POWER")) { 
 				var status = data.POWER;
-				that.contactDetected = (status == this.onValue);   //!!!! AQUÍ PUEDE FALTAR...  ? 0 : 1
+				that.contactDetected = (status == this.onValue) ? 0 : 1;   //!!!! AQUÍ PUEDE FALTAR...  ? 0 : 1
 		   		that.service.getCharacteristic(Characteristic.ContactSensorState).setValue(that.contactDetected, undefined);
 			}
 		} else if (topic == that.activityTopic) {
