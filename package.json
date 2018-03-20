@@ -1,6 +1,6 @@
 {
   "name": "homebridge-sonoff-contactsensor",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Plugin to HomeBridge optimized for work with Itead Sonoff hardware with firmware Sonoff-Tasmota via MQTT.",
   "main": "index.js",
   "scripts": {
@@ -25,7 +25,7 @@
     "itead",
     "tasmota",
     "Sonoff-Tasmota",
-	"Wifi IoT Relay Board"
+    "Wifi IoT Relay Board"
   ],
   "author": "Luciano Flores",
   "license": "MIT",

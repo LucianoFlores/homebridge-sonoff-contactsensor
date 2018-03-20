@@ -11,6 +11,9 @@ module.exports = function(homebridge) {
 
 //ContactSensorAccessorySonOff es el objeto que contiene toda la lógica de control
 function ContactSensorAccessorySonOff(log, config) {
+	this.fs = require('fs');
+	this.logFile = config['logFile'] || "";
+
 	this.log = log;
 
 	this.url = config['url'];
@@ -41,14 +44,13 @@ function ContactSensorAccessorySonOff(log, config) {
 	this.topicStatusGet	= config["topics"].statusGet;
 	this.topicsStateGet	= (config["topics"].stateGet  !== undefined) ? config["topics"].stateGet : "";
 
-	this.onValue = (config["onValue"] !== undefined) ? config["onValue"]: "ON";
-    this.offValue = (config["offValue"] !== undefined) ? config["offValue"]: "OFF";
+	this.onValue = (config["onValue"] !== undefined) ? config["onValue"] : "ON";
+    this.offValue = (config["offValue"] !== undefined) ? config["offValue"] : "OFF";
 
 	if (config["activityTopic"] !== undefined && config["activityParameter"] !== undefined) {
 		this.activityTopic = config["activityTopic"];
 	  	this.activityParameter = config["activityParameter"];
-	}
-	else {
+	} else {
 		this.activityTopic = "";
 	  	this.activityParameter = "";
 	}
@@ -58,60 +60,109 @@ function ContactSensorAccessorySonOff(log, config) {
 	this.model = config['model'] || "Sonoff";
 	this.serialNumberMAC = config['serialNumberMAC'] || "";
 
-	//Inicializo la variable a contacto no detetado = 1
-	this.contactDetected = Characteristic.ContactSensorState.CONTACT_NOT_DETECTED;
+	//Inicializo la variable a contacto no detetado
+	this.contactDetected = 1;	//CONTACT_NOT_DETECTED;
 
+	//Creo el servicio ContactSensor en Home y las características
 	this.service = new Service.ContactSensor(this.name);
-
 	this.service
-    	.getCharacteristic(Characteristic.ContactSensorState)
-    	.on('get', this.getStatus.bind(this))
+    	.getCharacteristic(Characteristic.ContactSensorState)	//Característica obligatoria
+    	.on('get', this.getStatus.bind(this))					//La función getStatus está escuchando el evento get
 
 	if(this.activityTopic !== "") {
 		this.service.addOptionalCharacteristic(Characteristic.StatusActive);
 		this.service
 			.getCharacteristic(Characteristic.StatusActive)
-			.on('get', this.getStatusActive.bind(this));
+			.on('get', this.getStatusActive.bind(this));		//La función getStatusActive está escuchando el evento get
 	}
+
 
 	this.client  = mqtt.connect(this.url, this.options);
 	var that = this;
-
-	//Caso de error
 	this.client.on('error', function () {
 		that.log('Error event on MQTT');
 	});
 
-	//Caso conexión inicial
+	//Ejecutar comamdos de inicio en el Sonoff
 	this.client.on('connect', function () {
 		if (config["startCmd"] !== undefined && config["startParameter"] !== undefined) {
 			that.client.publish(config["startCmd"], config["startParameter"]);
+
+			//----- Registro en el fichero de log -----
+			if (that.logFile !== "") {
+				that.fs.appendFile("/home/pi/.homebridge/sensorlog.txt", "Comando de inicio startCmd ejecutado" + "\n", function(err) {
+					if (err) {
+						that.log("startCmd: Problema al salvar log");
+					}
+				});
+			}
+			//-----------------------------------------
+
 		}
 	});
 
 	//Caso mensaje recibido
 	this.client.on('message', function (topic, message) {
+
+		//stat/sonoff/POWER values ON, OFF
 		if (topic == that.topicStatusGet) {
-			var status = message.toString();
 			//status contiene el estado del Sonoff
-			//that.contactDetected es el estado que activaré en Home
-			that.contactDetected = (status == this.onValue) ? 0 : 1;	//0 = Hay contacto, 1 = No hay contacto
+			var status = message.toString();
+			//that.contactDetected es el estado que activaré en Home. 0 = Hay contacto, 1 = No hay contacto
+			that.contactDetected = (status == this.onValue) ? 0 : 1;
+		   	//Asigno valor al servicio creado en Home
 		   	that.service.getCharacteristic(Characteristic.ContactSensorState).setValue(that.contactDetected, undefined);
+
+		   	//----- Registro en el fichero de log -----
+		   	if (that.logFile !== "") {
+				that.fs.appendFile("/home/pi/.homebridge/sensorlog.txt", "stat/sensor1/POWER = " + status + "\n", function(err) {
+					if (err) {
+						that.log("topicStatusGet: Problema al salvar log");
+					}
+				});
+			}
+			//-----------------------------------------
 		}
 		
+		//tele/sonoff/STATE is JSON with POWER property
 		if (topic == that.topicsStateGet) {
 			var data = JSON.parse(message);
 			
 			if (data.hasOwnProperty("POWER")) { 
 				var status = data.POWER;
-				that.contactDetected = (status == this.onValue);
+				if (status == this.onValue) {
+					that.contactDetected = 0;	//0 = El contacto se mantiene
+				}
 		   		that.service.getCharacteristic(Characteristic.ContactSensorState).setValue(that.contactDetected, undefined);
+
+			   	//----- Registro en el fichero de log -----
+			   	if (that.logFile !== "") {
+					that.fs.appendFile("/home/pi/.homebridge/sensorlog.txt", "tele/sensor1/STATE = " + status + "\n", function(err) {
+						if (err) {
+							that.log("topicsStateGet: Problema al salvar log");
+						}
+					});
+				}
+				//-----------------------------------------
 			}
+
+		  	   //tele/sonoff/LWT
 		} else if (topic == that.activityTopic) {
 			var status = message.toString(); 	
-			that.activeStat = (status == that.activityParameter);
+			that.activeStat = (status == that.activityParameter);	//Si status = onLine
 			that.service.setCharacteristic(Characteristic.StatusActive, that.activeStat);
+
+		   	//----- Registro en el fichero de log -----
+		   	if (that.logFile !== "") {
+				that.fs.appendFile("/home/pi/.homebridge/sensorlog.txt", "tele/sensor1/LWT = " + status + "\n", function(err) {
+					if (err) {
+						that.log("activityTopic: Problema al salvar log");
+					}
+				});
+			}
+			//-----------------------------------------
 		}
+
 	});
 
 	//Me suscribo a los topics
